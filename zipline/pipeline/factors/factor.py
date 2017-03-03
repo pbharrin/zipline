@@ -7,6 +7,7 @@ from numbers import Number
 
 from numpy import empty_like, inf, nan, where
 from scipy.stats import rankdata
+from scipy.stats.mstats import winsorize as scipy_winsorize
 
 from zipline.errors import UnknownRankMethod
 from zipline.lib.normalize import naive_grouped_rowwise_apply
@@ -833,6 +834,84 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
+    def winsorize(self,
+                  limits=0.05,
+                  inclusive=(False, False),
+                  mask=NotSpecified,
+                  groupby=NotSpecified):
+        """
+        Construct a Factor returns a winsorized row for results. This is useful
+        when limiting the impact of extreme values.
+
+        If ``mask`` is supplied, ignore values where ``mask`` returns False
+        when computing row means and standard deviations, and output NaN
+        anywhere the mask is False.
+
+        If ``groupby`` is supplied, compute by partitioning each row based on
+        the values produced by ``groupby``, winsorizing the partitioned arrays,
+        and stitching the sub-results back together.
+
+        Parameters
+        ----------
+        limits : None, tuple of float, optional
+            A tuple of two values between 0 and 1 inclusive. This is the
+            percentage to cut from each side of the array. A value of None
+            can be used to indicate an open limit.
+        inclusive : a tuple of bool, optional
+            A bool indicating whether the data on each side should be
+            rounded(True) or truncated(False). A value of None can be used if
+            one side is not being winsorized. Default is (False, False).
+        mask : zipline.pipeline.Filter, optional
+            A Filter defining values to ignore when winsorizing.
+        groupby : zipline.pipeline.Classifier, optional
+            A classifier defining partitions over which to winsorize.
+
+        Returns
+        -------
+        winsorized : zipline.pipeline.Factor
+            A Factor producing a winsorized version of the self.
+
+        Example
+        -------
+
+        price = USEquityPricing
+        columns={
+            'price': price.latest,
+            'winsor_inc': price.winsorize(limits=0.25, inclusive=(True, True)),
+            'winsor_exc': price.winsorize(
+                limits=0.25, inclusive=(False, False)
+            ),
+            'winsor_alt': price.winsorize(limits=0.25, inclusive=(True, False))
+
+        }
+
+        Given a pipeline with columns, defined above, the result for a
+        given day could look like:
+
+                'price'  'winsor_inc' 'winsor_exc'  'winsor_alt'
+        Asset_1    1           2           3             2
+        Asset_2    2           2           3             2
+        Asset_3    3           3           3             3
+        Asset_4    4           4           4             4
+        Asset_5    5           5           4             4
+        Asset_6    6           5           4             4
+
+        See Also
+        --------
+        :func:`scipy.stats.mstats.winsorize`
+        :meth:`pandas.DataFrame.groupby`
+        """
+        return GroupedRowTransform(
+            transform=winsorize,
+            transform_args=(limits, inclusive),
+            factor=self,
+            groupby=groupby,
+            dtype=self.dtype,
+            missing_value=self.missing_value,
+            mask=mask,
+            window_safe=True,
+        )
+
     @expect_types(bins=int, mask=(Filter, NotSpecifiedType))
     def quantiles(self, bins, mask=NotSpecified):
         """
@@ -1530,3 +1609,7 @@ def demean(row):
 
 def zscore(row):
     return (row - nanmean(row)) / nanstd(row)
+
+
+def winsorize(row, limits, inclusive):
+    return scipy_winsorize(row, limits=limits, inclusive=inclusive)
